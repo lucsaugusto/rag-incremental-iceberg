@@ -71,7 +71,7 @@ LLM local responde citando os chunks
 | --- | --- | --- |
 | 1. Estrutura | Repositório, ambiente e README | concluída |
 | 2. Ingestão + chunking | Documentos → `documentos_raw` e `kb_chunks` (574 chunks) | concluída |
-| 3. Embeddings + busca | Vetores e busca por similaridade | a fazer |
+| 3. Embeddings + busca | Vetores com `bge-m3` e busca por similaridade com filtro de ACL | em revisão |
 | 4. Incremental | Reprocessa só o que mudou; remoções propagadas | a fazer |
 | 5. ACL | Mesma pergunta, usuários diferentes, respostas diferentes | a fazer |
 | 6. Resposta com citação | LLM local responde citando os chunks | a fazer |
@@ -87,6 +87,9 @@ LLM local responde citando os chunks
 | --- | --- |
 | Um chunk por artigo de lei (artigos longos divididos com sobreposição) | O artigo é a unidade de sentido da lei, e o `chunk_id` fica estável (`cdc#art-49`): inserir um artigo novo não muda o id dos outros, então a etapa incremental não reprocessa o que não mudou |
 | Artigo repetido: fica a última redação | Páginas "compiladas" de normas trazem as redações antigas antes da atual (no Regulamento do Pix, 94 redações antigas). A última é a vigente; ela fica na posição original do artigo. Limitação conhecida: redações antigas de parágrafos dentro de um mesmo artigo ainda não são tratadas |
+| Cabeçalho de contexto no texto do embedding | "Art. 49. O consumidor pode desistir..." sozinho não diz de qual lei é. O modelo recebe título do documento + capítulo/seção + texto; a tabela guarda só o texto do chunk |
+| Vetor de outro modelo conta como pendente | Vetores de modelos diferentes não são comparáveis; trocar `MODELO_EMBEDDING` faz todos os chunks serem reprocessados |
+| Busca por força bruta, filtro de ACL antes do ranking | Com ~600 chunks, comparar com todos leva milissegundos. Filtrar antes evita que trechos proibidos ocupem as primeiras posições e sumam do resultado |
 | Warehouse do Iceberg com caminho relativo | O PyIceberg no Windows interpreta `C:\...` como se `C:` fosse um protocolo e falha. O teste `scripts/teste_iceberg.py` comparou as opções: o caminho relativo funciona, o `file:///C:/...` não |
 | ACL vazia = ninguém vê | Padrão seguro: um documento esquecido no `acl.yaml` fica bloqueado, nunca aberto para todos |
 | Limpeza do texto antes do chunking | O site do Planalto recua os artigos com espaço "não separável" (`\u00a0`, mais de 3.600 vezes no CDC); sem normalizar, nenhum artigo seria reconhecido. PDFs salvos pelo navegador trazem URL, data e numeração de página, também removidos |
@@ -99,12 +102,15 @@ Pré-requisitos: [uv](https://docs.astral.sh/uv/) e [Ollama](https://ollama.com/
 
 ```bash
 uv sync                                   # cria o ambiente com Python 3.12
-uv run python -m rag ingerir              # lê os PDFs e grava as tabelas Iceberg
+ollama pull bge-m3                        # modelo de embedding (uma vez)
+uv run python -m rag ingerir              # lê os documentos e grava as tabelas Iceberg
+uv run python -m rag embeddings           # gera os vetores dos chunks pendentes
+uv run python -m rag buscar "posso desistir de uma compra feita pela internet?" --grupos publico
 uv run python -m rag status               # mostra o conteúdo das tabelas
 uv run pytest                             # testes
 ```
 
-Próximas etapas: `uv run python -m rag perguntar "..." --usuario ana` e `uv run python -m rag avaliar`.
+Próximas etapas: resposta com citação e avaliação com golden set.
 
 ---
 
