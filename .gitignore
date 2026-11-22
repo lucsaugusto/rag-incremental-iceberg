@@ -1,0 +1,8 @@
+# ambiente
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# dados gerados pelo pipeline (tabelas Iceberg e catálogo)
+warehouse/

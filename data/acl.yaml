@@ -1,0 +1,13 @@
+# Permissões simuladas por documento.
+# A chave é o doc_id = nome do arquivo em data/fontes sem o ".pdf".
+# Documento sem entrada aqui fica com acl vazia, e acl vazia significa: ninguém vê.
+documentos:
+  cdc:
+    titulo: Código de Defesa do Consumidor (Lei 8.078/1990)
+    acl: [publico]
+  lgpd:
+    titulo: Lei Geral de Proteção de Dados (Lei 13.709/2018)
+    acl: [publico, juridico]
+  regulamento-pix:
+    titulo: Regulamento do Pix (anexo da Resolução BCB nº 1/2020)
+    acl: [atendimento, juridico]
