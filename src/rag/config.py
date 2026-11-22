@@ -24,6 +24,15 @@ CHUNK_MAX_TOKENS = 400
 CHUNK_OVERLAP_TOKENS = 50
 
 
+# Embeddings via Ollama local.
+OLLAMA_URL = "http://localhost:11434"
+MODELO_EMBEDDING = "bge-m3"        # multilíngue, vetores de 1.024 números
+LOTE_EMBEDDING = 16                # textos por chamada ao Ollama
+
+# Busca
+TOP_K = 5
+
+
 def ir_para_raiz() -> None:
     """Garante que o programa rode a partir da raiz (necessário para o caminho relativo)."""
     os.chdir(RAIZ)
