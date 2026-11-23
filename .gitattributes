@@ -1,0 +1,5 @@
+# Documentos de entrada sempre com quebra de linha LF, em qualquer sistema operacional.
+# Sem isso, o Git no Windows grava CRLF ao fazer checkout, o hash do arquivo muda
+# e o pipeline acha que o documento foi alterado.
+data/fontes/*.txt text eol=lf
+data/*.yaml text eol=lf

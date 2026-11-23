@@ -71,9 +71,9 @@ LLM local responde citando os chunks
 | --- | --- | --- |
 | 1. Estrutura | Repositório, ambiente e README | concluída |
 | 2. Ingestão + chunking | Documentos → `documentos_raw` e `kb_chunks` (574 chunks) | concluída |
-| 3. Embeddings + busca | Vetores com `bge-m3` e busca por similaridade com filtro de ACL | em revisão |
-| 4. Incremental | Reprocessa só o que mudou; remoções propagadas | a fazer |
-| 5. ACL | Mesma pergunta, usuários diferentes, respostas diferentes | a fazer |
+| 3. Embeddings + busca | Vetores com `bge-m3` e busca por similaridade com filtro de ACL | concluída |
+| 4. Incremental | Reprocessa só o que mudou; remoções propagadas; gravação atômica | concluída |
+| 5. ACL | Mesma pergunta, usuários diferentes, respostas diferentes | concluída (junto com a etapa 3) |
 | 6. Resposta com citação | LLM local responde citando os chunks | a fazer |
 | 7. Avaliação | Golden set + recall@5 | a fazer |
 | 8. Time travel (opcional) | "O que o assistente sabia no dia X?" | a fazer |
@@ -90,9 +90,38 @@ LLM local responde citando os chunks
 | Cabeçalho de contexto no texto do embedding | "Art. 49. O consumidor pode desistir..." sozinho não diz de qual lei é. O modelo recebe título do documento + capítulo/seção + texto; a tabela guarda só o texto do chunk |
 | Vetor de outro modelo conta como pendente | Vetores de modelos diferentes não são comparáveis; trocar `MODELO_EMBEDDING` faz todos os chunks serem reprocessados |
 | Busca por força bruta, filtro de ACL antes do ranking | Com ~600 chunks, comparar com todos leva milissegundos. Filtrar antes evita que trechos proibidos ocupem as primeiras posições e sumam do resultado |
+| Incremental em dois níveis: hash do arquivo, depois hash do chunk | Documento igual nem passa pelo chunking. Documento alterado passa, mas só os chunks com texto diferente perdem o vetor. Mudança só de ACL, seção ou ordem mantém o vetor |
+| Apagar e inserir na mesma transação Iceberg | É o equivalente ao `MERGE`: quem lê a tabela vê a versão de antes ou a de depois, nunca uma mistura. Cada snapshot leva a propriedade `rag.operacao` para o histórico mostrar qual etapa gravou |
+| Gravar os chunks antes dos documentos | Se o processo cair no meio, `documentos_raw` ainda tem o hash antigo e o documento é reprocessado na próxima execução. Como tudo é idempotente, reprocessar não duplica nada |
+| Quebras de linha normalizadas antes do hash do chunk + `.gitattributes` com LF | Um `git checkout` no Windows trocou LF por CRLF em todas as linhas do CDC. O hash do arquivo mudou, mas o do chunk não, então nenhum embedding foi gerado à toa. O `.gitattributes` fixa LF para os bytes serem iguais em qualquer sistema |
 | Warehouse do Iceberg com caminho relativo | O PyIceberg no Windows interpreta `C:\...` como se `C:` fosse um protocolo e falha. O teste `scripts/teste_iceberg.py` comparou as opções: o caminho relativo funciona, o `file:///C:/...` não |
 | ACL vazia = ninguém vê | Padrão seguro: um documento esquecido no `acl.yaml` fica bloqueado, nunca aberto para todos |
 | Limpeza do texto antes do chunking | O site do Planalto recua os artigos com espaço "não separável" (`\u00a0`, mais de 3.600 vezes no CDC); sem normalizar, nenhum artigo seria reconhecido. PDFs salvos pelo navegador trazem URL, data e numeração de página, também removidos |
+
+---
+
+## Resultados
+
+### Busca com filtro de ACL (etapa 3)
+
+| Pergunta | Grupos | 1º resultado | Score | Chunks bloqueados |
+| --- | --- | --- | --- | --- |
+| "posso desistir de uma compra feita pela internet?" | publico | `cdc#art-49` (direito de arrependimento) | 0,692 | 328 de 574 |
+| "como funciona o Pix agendado?" | publico | `cdc#art-40` (não responde: o Pix não é visível) | 0,390 | 328 de 574 |
+| "como funciona o Pix agendado?" | atendimento | `regulamento-pix#art-8` (Pix Agendado) | 0,750 | 246 de 574 |
+
+A busca 1 acha o artigo certo sem nenhuma palavra em comum: a pergunta diz "compra pela internet" e o artigo diz "contratação fora do estabelecimento comercial". As buscas 2 e 3 são a mesma pergunta com resultados diferentes conforme quem pergunta.
+
+### Incremental (etapa 4)
+
+| Mudança na fonte | Chunks reprocessados | Embeddings gerados | Tempo de embedding |
+| --- | --- | --- | --- |
+| Nenhuma | 0 | 0 | 0 s |
+| Art. 49 do CDC editado (7 → 14 dias) | 1 com texto alterado, 143 sem mudança | **1** | 16 s |
+| ACL do CDC alterada | 144 só com metadados (vetor mantido) | **0** | 0 s |
+| Reconstrução completa, para comparar | 574 | 574 | alguns minutos |
+
+O incremental tem dois custos: recomputar embeddings (reduzido ao mínimo pelo hash do chunk) e reescrever arquivos Parquet. O PyIceberg apaga linhas em modo copy-on-write: mudar 144 linhas chegou a regravar os 574 registros do arquivo onde elas estavam. Em escala, isso se controla particionando `kb_chunks` por `doc_id` ou usando o modo merge-on-read do Iceberg (Spark, Trino).
 
 ---
 
@@ -103,7 +132,8 @@ Pré-requisitos: [uv](https://docs.astral.sh/uv/) e [Ollama](https://ollama.com/
 ```bash
 uv sync                                   # cria o ambiente com Python 3.12
 ollama pull bge-m3                        # modelo de embedding (uma vez)
-uv run python -m rag ingerir              # lê os documentos e grava as tabelas Iceberg
+uv run python -m rag run                  # pipeline completo: ingerir + embeddings
+uv run python -m rag ingerir              # incremental: grava só o que mudou na fonte
 uv run python -m rag embeddings           # gera os vetores dos chunks pendentes
 uv run python -m rag buscar "posso desistir de uma compra feita pela internet?" --grupos publico
 uv run python -m rag status               # mostra o conteúdo das tabelas
